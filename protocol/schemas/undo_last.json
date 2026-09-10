@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cemp.spec/v1/schemas/undo_last.json",
+  "title": "UndoLastTool",
+  "description": "Revert the most recent applied patch or transaction using git working tree integration.",
+  "type": "object",
+  "properties": {
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Optional file path to constrain undo. If omitted, reverts last overall patch."
+        }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["reverted"]
+        },
+        "reverted_patch_id": { "type": "string" },
+        "reverted_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "current_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 digest of target file after reversion."
+        }
+      },
+      "required": ["status", "reverted_patch_id", "reverted_files"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cemp.spec/v1/schemas/syntax_check.json",
+  "title": "SyntaxCheckTool",
+  "description": "Verification hook contract for language-aware syntax and compiler validation.",
+  "type": "object",
+  "properties": {
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path of the file to validate."
+        },
+        "language": {
+          "type": "string",
+          "description": "Optional language override (python, javascript, typescript, go, rust)."
+        }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "valid": { "type": "boolean" },
+        "checker_used": { "type": "string" },
+        "errors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Compiler or parser diagnostic errors if syntax is invalid."
+        }
+      },
+      "required": ["valid", "checker_used", "errors"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cemp.spec/v1/schemas/apply_patch.json",
+  "title": "ApplyPatchTool",
+  "description": "Apply a proposed patch to disk or stage it into an active transaction with atomic write guarantees.",
+  "type": "object",
+  "properties": {
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "patch_id": {
+          "type": "string",
+          "description": "Identifier of the staged patch from propose_edit or propose_line_edit."
+        },
+        "tx_id": {
+          "type": "string",
+          "description": "Optional transaction ID. If provided, stages patch in transaction without writing to disk."
+        },
+        "verify_syntax": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to run language syntax validation hooks post-write with auto-rollback."
+        }
+      },
+      "required": ["patch_id"],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["applied", "staged"]
+        },
+        "patch_id": { "type": "string" },
+        "path": { "type": "string" },
+        "new_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "Hex-encoded SHA-256 digest of the updated file."
+        },
+        "syntax_check": {
+          "type": "object",
+          "properties": {
+            "passed": { "type": "boolean" },
+            "checker": { "type": "string" }
+          },
+          "required": ["passed"]
+        }
+      },
+      "required": ["status", "patch_id", "path"],
+      "additionalProperties": false
+    }
+  }
+}

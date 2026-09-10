@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cemp.spec/v1/schemas/read_file.json",
+  "title": "ReadFileTool",
+  "description": "Read file contents with 1-indexed line numbers and content SHA-256 hash for CAS operations.",
+  "type": "object",
+  "properties": {
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the target file, absolute or relative to workspace root."
+        },
+        "line_range": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Optional [start_line, end_line] 1-indexed inclusive range."
+        }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": [
+              { "type": "integer", "minimum": 1 },
+              { "type": "string" }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "description": "Array of [line_number, line_text] pairs."
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "Hex-encoded SHA-256 digest of the entire file on disk."
+        },
+        "total_lines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total line count of the file."
+        }
+      },
+      "required": ["path", "lines", "content_hash", "total_lines"],
+      "additionalProperties": false
+    }
+  }
+}

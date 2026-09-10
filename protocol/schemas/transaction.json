@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cemp.spec/v1/schemas/transaction.json",
+  "title": "TransactionTools",
+  "description": "Schemas for multi-file atomic transactions (begin, commit, rollback).",
+  "type": "object",
+  "definitions": {
+    "begin_transaction": {
+      "type": "object",
+      "properties": {
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "isolation_level": {
+              "type": "string",
+              "enum": ["snapshot"],
+              "default": "snapshot"
+            }
+          },
+          "additionalProperties": false
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "tx_id": { "type": "string" },
+            "status": { "type": "string", "enum": ["open"] },
+            "expires_in_seconds": { "type": "integer", "default": 1800 }
+          },
+          "required": ["tx_id", "status"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "commit_transaction": {
+      "type": "object",
+      "properties": {
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tx_id": { "type": "string" },
+            "verify_syntax": { "type": "boolean", "default": true }
+          },
+          "required": ["tx_id"],
+          "additionalProperties": false
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["committed"] },
+            "tx_id": { "type": "string" },
+            "files_updated": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "file_hashes": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "required": ["status", "tx_id", "files_updated"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "rollback_transaction": {
+      "type": "object",
+      "properties": {
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tx_id": { "type": "string" }
+          },
+          "required": ["tx_id"],
+          "additionalProperties": false
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["rolled_back"] },
+            "tx_id": { "type": "string" },
+            "discarded_patches_count": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["status", "tx_id"],
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

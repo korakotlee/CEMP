@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cemp.spec/v1/schemas/propose_line_edit.json",
+  "title": "ProposeLineEditTool",
+  "description": "Propose a line range edit protected by Compare-And-Swap (CAS) hash validation.",
+  "type": "object",
+  "properties": {
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Target file path."
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed starting line number of the target block."
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed inclusive ending line number of the target block."
+        },
+        "new_content": {
+          "type": "string",
+          "description": "New replacement content for the specified line range."
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 hash of the target file content obtained from read_file."
+        }
+      },
+      "required": ["path", "start_line", "end_line", "new_content", "content_hash"],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok"]
+        },
+        "patch_id": {
+          "type": "string",
+          "description": "Unique identifier for the staged patch proposal."
+        },
+        "path": { "type": "string" },
+        "diff_preview": {
+          "type": "string",
+          "description": "Server-generated unified diff preview showing proposed changes."
+        },
+        "expires_in_seconds": {
+          "type": "integer",
+          "default": 900
+        }
+      },
+      "required": ["status", "patch_id", "path", "diff_preview"],
+      "additionalProperties": false
+    }
+  }
+}

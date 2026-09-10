@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cemp.spec/v1/schemas/propose_edit.json",
+  "title": "ProposeEditTool",
+  "description": "Propose an exact string replacement with strict occurrence checking and dry-run unified diff preview.",
+  "type": "object",
+  "properties": {
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Target file path."
+        },
+        "old_str": {
+          "type": "string",
+          "description": "Exact text substring to be replaced."
+        },
+        "new_str": {
+          "type": "string",
+          "description": "Replacement text content."
+        },
+        "expected_occurrences": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Strict expected count of matches. If actual matches differ, proposal is rejected."
+        }
+      },
+      "required": ["path", "old_str", "new_str"],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok"]
+        },
+        "patch_id": {
+          "type": "string",
+          "description": "Unique identifier for the staged patch proposal."
+        },
+        "path": { "type": "string" },
+        "match_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "diff_preview": {
+          "type": "string",
+          "description": "Server-generated unified diff preview showing proposed changes."
+        },
+        "expires_in_seconds": {
+          "type": "integer",
+          "default": 900
+        }
+      },
+      "required": ["status", "patch_id", "path", "match_count", "diff_preview"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-import difflib
 from pathlib import Path
 from typing import Any
 
-from core.hasher import compute_content_hash, normalize_line_endings
+from core.git_undo import get_git_undo_manager
+from core.hasher import compute_content_hash
 from core.inspection import get_file_hash, read_file, search_code
 from core.patch_cache import PatchCache, PatchStatus
+from core.proposals import propose_edit as _propose_edit
+from core.proposals import propose_line_edit as _propose_line_edit
 from core.storage import atomic_write_file
 from core.workspace import resolve_workspace_path
 from errors import (
     FileModifiedError,
-    InvalidRangeError,
-    NoMatchError,
-    OccurrenceMismatchError,
     PatchAlreadyAppliedError,
-    StaleHashError,
+    SyntaxErrorCEMP,
 )
+from verification import get_verification_registry
 
 # Global patch cache singleton
 _patch_cache = PatchCache(default_ttl_seconds=900)
@@ -29,23 +29,6 @@ def get_patch_cache() -> PatchCache:
     return _patch_cache
 
 
-def _generate_unified_diff(
-    original_text: str,
-    new_text: str,
-    path: str,
-) -> str:
-    """Generate a standard unified diff preview between two texts."""
-    orig_lines = [line + "\n" for line in original_text.splitlines()]
-    new_lines = [line + "\n" for line in new_text.splitlines()]
-    diff = difflib.unified_diff(
-        orig_lines,
-        new_lines,
-        fromfile=f"a/{path}",
-        tofile=f"b/{path}",
-    )
-    return "".join(diff)
-
-
 def propose_edit(
     path: str,
     old_str: str,
@@ -53,64 +36,15 @@ def propose_edit(
     expected_occurrences: int = 1,
     workspace_root: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Propose an exact string replacement with strict occurrence enforcement.
-
-    Args:
-        path: Target file path within workspace.
-        old_str: Exact substring to be replaced.
-        new_str: Replacement substring.
-        expected_occurrences: Expected number of matches (default: 1).
-        workspace_root: Optional workspace root directory.
-
-    Returns:
-        Dictionary conforming to protocol/schemas/propose_edit.json.
-    """
-    resolved_path = resolve_workspace_path(path, workspace_root=workspace_root, must_exist=True)
-    raw_text = resolved_path.read_text(encoding="utf-8", errors="replace")
-    normalized_text = normalize_line_endings(raw_text)
-    base_hash = compute_content_hash(raw_text)
-
-    count = normalized_text.count(old_str)
-    if count == 0:
-        raise NoMatchError(
-            message=f"Target string not found in '{path}'.",
-            data={"path": path, "old_str": old_str},
-        )
-
-    if count != expected_occurrences:
-        # Collect line numbers and previews for each occurrence
-        matches: list[dict[str, Any]] = []
-        for idx, line in enumerate(normalized_text.splitlines(), start=1):
-            if old_str in line:
-                matches.append({"line": idx, "preview": line})
-        raise OccurrenceMismatchError(
-            message=f"String matched {count} times; expected exactly {expected_occurrences}.",
-            data={
-                "path": path,
-                "expected_occurrences": expected_occurrences,
-                "actual_occurrences": count,
-                "matches": matches,
-            },
-        )
-
-    new_content = normalized_text.replace(old_str, new_str)
-    diff_preview = _generate_unified_diff(normalized_text, new_content, path)
-
-    proposal = _patch_cache.store(
+    """Propose an exact string replacement with strict occurrence enforcement."""
+    return _propose_edit(
         path=path,
-        base_hash=base_hash,
-        new_content=new_content,
-        diff=diff_preview,
+        old_str=old_str,
+        new_str=new_str,
+        patch_cache=_patch_cache,
+        expected_occurrences=expected_occurrences,
+        workspace_root=workspace_root,
     )
-
-    return {
-        "status": "ok",
-        "patch_id": proposal.patch_id,
-        "path": path,
-        "match_count": count,
-        "diff_preview": diff_preview,
-        "expires_in_seconds": proposal.ttl_seconds,
-    }
 
 
 def propose_line_edit(
@@ -121,65 +55,16 @@ def propose_line_edit(
     content_hash: str,
     workspace_root: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Propose a line-bounded edit protected by CAS hash validation.
-
-    Args:
-        path: Target file path within workspace.
-        start_line: 1-indexed start line number.
-        end_line: 1-indexed inclusive end line number.
-        new_content: Replacement text for the specified line block.
-        content_hash: SHA-256 hash expected from prior read_file.
-        workspace_root: Optional workspace root directory.
-
-    Returns:
-        Dictionary conforming to protocol/schemas/propose_line_edit.json.
-    """
-    resolved_path = resolve_workspace_path(path, workspace_root=workspace_root, must_exist=True)
-    raw_text = resolved_path.read_text(encoding="utf-8", errors="replace")
-    live_hash = compute_content_hash(raw_text)
-
-    if live_hash != content_hash:
-        raise StaleHashError(
-            message=f"File hash '{live_hash}' differs from provided hash '{content_hash}'.",
-            data={"path": path, "expected_hash": content_hash, "actual_hash": live_hash},
-        )
-
-    normalized_text = normalize_line_endings(raw_text)
-    lines = normalized_text.splitlines()
-    total_lines = len(lines)
-
-    if start_line < 1 or start_line > end_line or end_line > total_lines:
-        raise InvalidRangeError(
-            message=f"Invalid line range [{start_line}, {end_line}] for {total_lines} lines.",
-            data={"path": path, "line_range": [start_line, end_line], "total_lines": total_lines},
-        )
-
-    before_lines = lines[: start_line - 1]
-    norm_new_content = normalize_line_endings(new_content)
-    replacement_lines = norm_new_content.splitlines() if norm_new_content else []
-    after_lines = lines[end_line:]
-
-    assembled_lines = before_lines + replacement_lines + after_lines
-    assembled_content = "\n".join(assembled_lines)
-    if raw_text.endswith("\n") or not raw_text:
-        assembled_content += "\n"
-
-    diff_preview = _generate_unified_diff(normalized_text, assembled_content, path)
-
-    proposal = _patch_cache.store(
+    """Propose a line-bounded edit protected by CAS hash validation."""
+    return _propose_line_edit(
         path=path,
-        base_hash=live_hash,
-        new_content=assembled_content,
-        diff=diff_preview,
+        start_line=start_line,
+        end_line=end_line,
+        new_content=new_content,
+        content_hash=content_hash,
+        patch_cache=_patch_cache,
+        workspace_root=workspace_root,
     )
-
-    return {
-        "status": "ok",
-        "patch_id": proposal.patch_id,
-        "path": path,
-        "diff_preview": diff_preview,
-        "expires_in_seconds": proposal.ttl_seconds,
-    }
 
 
 def apply_patch(
@@ -188,11 +73,11 @@ def apply_patch(
     verify_syntax: bool = True,
     workspace_root: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Atomically commit a staged patch proposal to disk after CAS re-validation.
+    """Atomically commit a staged patch proposal to disk with verification.
 
     Args:
         patch_id: UUID of the staged patch.
-        tx_id: Optional transaction ID (for multi-file transactions).
+        tx_id: Optional transaction ID.
         verify_syntax: Whether to verify syntax post-write.
         workspace_root: Optional workspace root directory.
 
@@ -222,7 +107,40 @@ def apply_patch(
             },
         )
 
+    # 1. Capture pre-write undo snapshot (zero-pollution Git loose blob or fallback)
+    root = Path(workspace_root) if workspace_root else None
+    undo_mgr = get_git_undo_manager(workspace_root=root)
+    snapshot = undo_mgr.snapshot(resolved_path)
+
+    # 2. Perform atomic write to disk
     atomic_write_file(resolved_path, proposal.new_content)
+
+    # 3. Perform post-write syntax verification with auto-rollback
+    syntax_info = {"passed": True, "checker": "none"}
+    if verify_syntax:
+        registry = get_verification_registry()
+        syntax_res = registry.check(resolved_path)
+        syntax_info = {
+            "passed": syntax_res.valid,
+            "checker": syntax_res.checker_used,
+        }
+        if not syntax_res.valid:
+            undo_mgr.rollback(snapshot)
+            err_msg = "; ".join(syntax_res.errors) if syntax_res.errors else "Syntax error"
+            raise SyntaxErrorCEMP(
+                message=f"Syntax check failed for '{proposal.path}': {err_msg}",
+                data={
+                    "path": proposal.path,
+                    "checker": syntax_res.checker_used,
+                    "errors": syntax_res.errors,
+                    "rolled_back": True,
+                },
+            )
+
+    # 4. Record applied patch in undo history
+    undo_mgr.record_applied(
+        patch_id=patch_id, target_path=str(resolved_path), snapshot=snapshot
+    )
     _patch_cache.mark_applied(patch_id)
     new_hash = compute_content_hash(proposal.new_content)
 
@@ -231,7 +149,40 @@ def apply_patch(
         "patch_id": patch_id,
         "path": proposal.path,
         "new_hash": new_hash,
+        "syntax_check": syntax_info,
     }
+
+
+def undo_last(
+    path: str | None = None,
+    workspace_root: Path | str | None = None,
+) -> dict[str, Any]:
+    """Revert the most recent applied patch via zero-pollution Git undo.
+
+    Args:
+        path: Optional file path to constrain reversion.
+        workspace_root: Optional workspace root directory.
+
+    Returns:
+        Dictionary conforming to protocol/schemas/undo_last.json.
+    """
+    resolved_target = None
+    if path:
+        resolved = resolve_workspace_path(path, workspace_root=workspace_root, must_exist=False)
+        resolved_target = str(resolved)
+
+    root = Path(workspace_root) if workspace_root else None
+    undo_mgr = get_git_undo_manager(workspace_root=root)
+    res = undo_mgr.undo_last(target_path=resolved_target)
+
+    result: dict[str, Any] = {
+        "status": res.status,
+        "reverted_patch_id": res.reverted_patch_id,
+        "reverted_files": res.reverted_files,
+    }
+    if res.current_hash:
+        result["current_hash"] = res.current_hash
+    return result
 
 
 __all__ = [
@@ -242,4 +193,5 @@ __all__ = [
     "propose_line_edit",
     "read_file",
     "search_code",
+    "undo_last",
 ]

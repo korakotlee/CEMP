@@ -31,6 +31,9 @@ from core.engine import (
 from core.engine import (
     search_code as core_search_code,
 )
+from core.engine import (
+    undo_last as core_undo_last,
+)
 from errors import (
     OccurrenceMismatchError,
     format_cemp_error,
@@ -251,6 +254,17 @@ def apply_patch(
         tx_id=tx_id,
         verify_syntax=verify_syntax,
     )
+
+
+@cemp_tool
+def undo_last(path: str | None = None) -> dict[str, Any]:
+    """Revert the most recent applied patch or transaction using zero-pollution Git undo.
+
+    Args:
+        path: Optional file path to constrain undo. If omitted, reverts last overall patch.
+    """
+    debug_log("Invoking undo_last", path=path)
+    return core_undo_last(path=path)
 
 
 def main() -> None:

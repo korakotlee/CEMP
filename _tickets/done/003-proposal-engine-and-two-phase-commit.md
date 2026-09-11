@@ -11,25 +11,25 @@ Implement the two-phase commit (2PC) patch proposal and application engine (`pro
 * **Expected Behavior:** Edits are proposed and reviewed in memory first without touching disk. Proposing returns a unified diff preview and an ephemeral `patch_id`. Committing requires an explicit `apply_patch` call that re-validates file hashes and performs atomic file replacement.
 
 ### 3. Acceptance Criteria
-- [ ] Implement in-memory `PatchCache` with UUID `patch_id` generation, state tracking, and a 15-minute default Time-To-Live (TTL). Expired patches return error `-32021` (`E_PATCH_EXPIRED`).
-- [ ] Implement `propose_edit` conforming to `protocol/schemas/propose_edit.json`:
+- [x] Implement in-memory `PatchCache` with UUID `patch_id` generation, state tracking, and a 15-minute default Time-To-Live (TTL). Expired patches return error `-32021` (`E_PATCH_EXPIRED`).
+- [x] Implement `propose_edit` conforming to `protocol/schemas/propose_edit.json`:
   - Enforce `expected_occurrences` (default: `1`).
   - Return error `-32000` (`E_NO_MATCH`) if occurrence count is 0.
   - Return error `-32001` (`E_OCCURRENCE_MISMATCH`) with line locations of all matches if occurrence count does not equal `expected_occurrences`.
   - Generate standard unified diff preview via standard library `difflib.unified_diff`.
-- [ ] Implement `propose_line_edit` conforming to `protocol/schemas/propose_line_edit.json`:
+- [x] Implement `propose_line_edit` conforming to `protocol/schemas/propose_line_edit.json`:
   - Validate 1-indexed start and end line ranges against target file length.
   - Validate `content_hash` against live file SHA-256 digest, returning error `-32010` (`E_STALE_HASH`) on mismatch with current hash.
   - Generate unified diff preview and return `patch_id`.
-- [ ] Implement `core/storage.py` for APFS atomic replacement:
+- [x] Implement `core/storage.py` for APFS atomic replacement:
   - Write replacement content to temporary sibling file (`<path>.<uuid>.cemp.tmp`).
   - Flush user-space buffers and call `os.fsync` on the descriptor before renaming.
   - Execute atomic replace using `os.replace`.
-- [ ] Implement `apply_patch` conforming to `protocol/schemas/apply_patch.json`:
+- [x] Implement `apply_patch` conforming to `protocol/schemas/apply_patch.json`:
   - Re-verify target file content hash against pre-condition baseline before disk write.
   - Atomically swap modified content into target file.
   - Mark `patch_id` as applied to prevent duplicate execution (raising `-32022` `E_PATCH_ALREADY_APPLIED`).
-- [ ] Mount tools onto `server.py` and validate live against `tests/test_conformance.py`.
+- [x] Mount tools onto `server.py` and validate live against `tests/test_conformance.py`.
 
 ### 4. Data Model
 * **Storage & Schema:** Ephemeral in-memory dictionary for `PatchCache` (`patch_id -> PatchProposal(path, base_hash, new_content, diff, created_at, status)`).

@@ -43,6 +43,7 @@ flowchart TD
         CoreInspection["core/inspection.py"]
         CorePatchCache["core/patch_cache.py"]
         CoreStorage["core/storage.py"]
+        CoreGitUndo["core/git_undo.py"]
         Verification["verification/"]
     end
 
@@ -60,6 +61,7 @@ flowchart TD
     CoreEngine --> CorePatchCache
     CoreEngine --> CoreStorage
     CoreEngine --> CoreHasher
+    CoreEngine --> CoreGitUndo
     Server --> Verification
     PyTests --> Implementation
     Conformance --> Schemas
@@ -93,7 +95,8 @@ When the `cemp` MCP server is active in the host environment, agents should util
 - **`cemp.search_code`**: Use for semantic and regex code search across workspace boundaries.
 - **`cemp.propose_edit`**: Use to propose exact string replacements with dry-run unified diff previews and strict occurrence enforcement (`expected_occurrences`). Rejects with `E_NO_MATCH` or `E_OCCURRENCE_MISMATCH` if match counts differ.
 - **`cemp.propose_line_edit`**: Use to propose line-range edits protected by optimistic CAS hash validation (`content_hash`). Rejects with `E_STALE_HASH` if the file modified since last inspection.
-- **`cemp.apply_patch`**: Use to commit a staged patch proposal (`patch_id`) to disk. Re-verifies content hash prior to disk write (`E_FILE_MODIFIED`) and commits atomically via sibling temporary files and `os.replace`.
+- **`cemp.apply_patch`**: Use to commit a staged patch proposal (`patch_id`) to disk with automated syntax verification and rollback. Re-verifies content hash prior to disk write (`E_FILE_MODIFIED`) and commits atomically via sibling temporary files and `os.replace`.
+- **`cemp.undo_last`**: Use to restore files to pre-edit state via Git object plumbing or fallback buffers without polluting commit history or working tree.
 - **`cemp.ping_error`**: Use to verify standard CEMP error formatting and connectivity diagnostics.
 
 ---

@@ -212,3 +212,65 @@ def test_apply_patch_expired(temp_git_repo: Path):
     with pytest.raises(PatchExpiredError) as exc_info:
         apply_patch(patch_id=patch_id, workspace_root=temp_git_repo)
     assert exc_info.value.code == -32021
+
+
+def test_apply_patch_syntax_verification_success(temp_git_repo: Path):
+    """Verify apply_patch runs syntax verification and reports passed status."""
+    target_file = temp_git_repo / "valid_code.py"
+    target_file.write_text("value = 1\n", encoding="utf-8")
+
+    proposal = propose_edit(
+        path="valid_code.py",
+        old_str="value = 1",
+        new_str="value = 42",
+        workspace_root=temp_git_repo,
+    )
+    patch_id = proposal["patch_id"]
+
+    result = apply_patch(patch_id=patch_id, verify_syntax=True, workspace_root=temp_git_repo)
+    assert result["status"] == "applied"
+    assert result["syntax_check"]["passed"] is True
+    assert result["syntax_check"]["checker"] == "py_compile"
+    assert target_file.read_text(encoding="utf-8") == "value = 42\n"
+
+
+def test_apply_patch_syntax_failure_auto_rollback(temp_git_repo: Path):
+    """Verify apply_patch automatically rolls back file and raises error when syntax is invalid."""
+    target_file = temp_git_repo / "rollback_test.py"
+    target_file.write_text("x = 10\n", encoding="utf-8")
+
+    proposal = propose_edit(
+        path="rollback_test.py",
+        old_str="x = 10",
+        new_str="def broken(\n",
+        workspace_root=temp_git_repo,
+    )
+    patch_id = proposal["patch_id"]
+
+    with pytest.raises(Exception) as exc_info:
+        apply_patch(patch_id=patch_id, verify_syntax=True, workspace_root=temp_git_repo)
+
+    # Must raise E_SYNTAX_ERROR (-32040) or E_ROLLBACK_TRIGGERED (-32042)
+    assert getattr(exc_info.value, "code", None) in (-32040, -32042)
+    # Target file on disk MUST have been rolled back to initial state
+    assert target_file.read_text(encoding="utf-8") == "x = 10\n"
+
+
+def test_apply_patch_skip_syntax_verification(temp_git_repo: Path):
+    """Verify verify_syntax=False writes file without invoking syntax validation."""
+    target_file = temp_git_repo / "skip_test.py"
+    target_file.write_text("x = 10\n", encoding="utf-8")
+
+    proposal = propose_edit(
+        path="skip_test.py",
+        old_str="x = 10\n",
+        new_str="def broken(\n",
+        workspace_root=temp_git_repo,
+    )
+    patch_id = proposal["patch_id"]
+
+    result = apply_patch(patch_id=patch_id, verify_syntax=False, workspace_root=temp_git_repo)
+    assert result["status"] == "applied"
+    assert target_file.read_text(encoding="utf-8") == "def broken(\n"
+
+

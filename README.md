@@ -23,7 +23,7 @@ Full specifications, schemas, and API shapes are detailed in the [Technical Guid
 | **1. Read & Inspection** | Line-numbered reads, semantic regex search, content hashing | Eliminates off-by-one errors; establishes CAS baseline (`read_file`, `get_file_hash`, `search_code` available) |
 | **2. Multi-Strategy Patching** | Exact string match, line-range with CAS, and AST-aware edits | Strict occurrence counts; loud failures over silent edits |
 | **3. Two-Phase Commit** | Proposal creates diff preview and `patch_id` without touching disk | Verifiable dry-run before any physical filesystem write |
-| **4. Multi-File Transactions** | `begin_transaction`, staged patches, atomic commit/rollback | All-or-nothing multi-file refactoring without partial state |
+| **4. Multi-File Transactions** | `begin_transaction`, staged patches, atomic commit/rollback | All-or-nothing multi-file refactoring without partial state (`begin_transaction`, `commit_transaction`, `rollback_transaction` available) |
 | **5. Verification Hooks** | Automated syntax checks (`py_compile`, `node --check`) and tests | Auto-rollback on compiler/test failure before agent proceeds |
 | **6. Git-Backed Undo** | Instant patch reversion via local working tree integration | Safe state recovery without proprietary snapshot buffers |
 

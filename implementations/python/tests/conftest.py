@@ -69,6 +69,14 @@ def schema_validator(protocol_dir: Path) -> Callable[[str, dict[str, Any]], None
             schemas[schema_file.stem] = json.load(f)
             schemas[schema_file.name] = schemas[schema_file.stem]
 
+    def _run_validate(subschema: dict[str, Any], inst: dict[str, Any]) -> None:
+        try:
+            Draft202012Validator(subschema).validate(inst)
+        except AttributeError:
+            from jsonschema import Draft7Validator
+
+            Draft7Validator(subschema).validate(inst)
+
     def validate(schema_name: str, instance: dict[str, Any], target: str | None = None) -> None:
         key = schema_name.removesuffix(".json")
         if key not in schemas:
@@ -80,15 +88,12 @@ def schema_validator(protocol_dir: Path) -> Callable[[str, dict[str, Any]], None
             if target not in schema_def.get("properties", {}):
                 raise KeyError(f"Target '{target}' not in schema '{schema_name}' properties")
             subschema = schema_def["properties"][target]
-            validator = Draft202012Validator(subschema)
-            validator.validate(instance)
+            _run_validate(subschema, instance)
         elif "parameters" in schema_def.get("properties", {}):
             # Default to parameters validation if instance matches parameter shape
-            validator = Draft202012Validator(schema_def["properties"]["parameters"])
-            validator.validate(instance)
+            _run_validate(schema_def["properties"]["parameters"], instance)
         else:
-            validator = Draft202012Validator(schema_def)
-            validator.validate(instance)
+            _run_validate(schema_def, instance)
 
     return validate
 

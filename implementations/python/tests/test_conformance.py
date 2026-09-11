@@ -184,3 +184,47 @@ def test_stdio_handshake_clean_stdout():
     assert parsed.get("id") == 1
     assert "result" in parsed
     assert parsed["result"]["serverInfo"]["name"] == "cemp"
+
+
+@pytest.mark.asyncio
+async def test_read_file_conformance_schema(
+    server_instance, schema_validator, temp_git_repo: Path, monkeypatch
+):
+    """Validate read_file request and response against protocol/schemas/read_file.json."""
+    monkeypatch.setenv("CEMP_WORKSPACE_ROOT", str(temp_git_repo))
+
+    req = {"path": "README.md", "line_range": [1, 1]}
+    schema_validator("read_file", req, target="parameters")
+
+    res: CallToolResult = await server_instance.call_tool("read_file", req)
+    assert res.isError is False
+    payload = json.loads(res.content[0].text)
+    schema_validator("read_file", payload, target="response")
+
+    assert payload["total_lines"] >= 1
+    assert payload["lines"][0] == [1, "# CEMP Test Repository"]
+
+
+@pytest.mark.asyncio
+async def test_search_code_conformance_schema(
+    server_instance, schema_validator, temp_git_repo: Path, monkeypatch
+):
+    """Validate search_code request and response against protocol/schemas/search_code.json."""
+    monkeypatch.setenv("CEMP_WORKSPACE_ROOT", str(temp_git_repo))
+
+    req = {
+        "pattern": "CEMP",
+        "path_glob": "**/*.md",
+        "regex": False,
+        "context_lines": 2,
+    }
+    schema_validator("search_code", req, target="parameters")
+
+    res: CallToolResult = await server_instance.call_tool("search_code", req)
+    assert res.isError is False
+    payload = json.loads(res.content[0].text)
+    schema_validator("search_code", payload, target="response")
+
+    assert payload["total_matches"] >= 1
+    assert any("README.md" in m["file"] for m in payload["matches"])
+

@@ -11,19 +11,19 @@ Establish the executable "walking skeleton" of the CEMP Python implementation by
 * **Expected Behavior:** An immediate running server harness exists from Day 1. Developers can run `uv run python -m server`, connect MCP hosts, and run `pytest tests/test_conformance.py` to continuously validate tool signatures and responses against `protocol/schemas/*.json` as each feature is completed.
 
 ### 3. Acceptance Criteria
-- [ ] Scaffold `implementations/python/pyproject.toml` with `mcp[cli]>=1.2.0`, `pydantic>=2.0`, `jsonschema>=4.20`, `ruff`, and `pytest`.
-- [ ] Create `implementations/python/server.py` initializing the FastMCP server instance:
+- [x] Scaffold `implementations/python/pyproject.toml` with `mcp[cli]>=1.2.0`, `pydantic>=2.0`, `jsonschema>=4.20`, `ruff`, and `pytest`.
+- [x] Create `implementations/python/server.py` initializing the FastMCP server instance:
   - Configure server name `cemp` and version `1.0.0-draft`.
   - Expose stdio transport as default entrypoint (`uv run python -m server`).
   - Add centralized exception handler converting internal exceptions to standardized CEMP error payloads matching `protocol/error-codes.md`.
-- [ ] Implement `tests/conftest.py` with reusable fixtures:
+- [x] Implement `tests/conftest.py` with reusable fixtures:
   - Isolated temporary git repository fixture (`temp_git_repo`).
   - FastMCP client test runner fixture for invoking tools in-memory over stdio pipes.
   - JSON schema validator fixture loading schemas from `protocol/schemas/`.
-- [ ] Implement `tests/test_conformance.py`:
+- [x] Implement `tests/test_conformance.py`:
   - Verify server boots up cleanly and handles invalid tool arguments with schema validation errors.
   - Verify error formatting includes `code`, `name`, `message`, `data`, `recoverable`, and `suggested_action`.
-- [ ] Ensure formatting and quality checks pass (`ruff check`, `ruff format --check`).
+- [x] Ensure formatting and quality checks pass (`ruff check`, `ruff format --check`).
 
 ### 4. Data Model
 * **Storage & Schema:** MCP JSON-RPC 2.0 protocol over stdio. Schema fixtures load JSON Schema Draft 2020-12 specifications dynamically from `protocol/schemas/*.json`.

@@ -17,6 +17,7 @@ This document provides a comprehensive technical reference for engineers, system
 3. [File System Safety & Atomic Operations](#3-file-system-safety--atomic-operations)
 4. [Reference Implementation Details](#4-reference-implementation-details)
 5. [Linting, Testing & Verification Standards](#5-linting-testing--verification-standards)
+6. [Appendix: Zero-Pollution Git Rollback Mechanics](#6-appendix-zero-pollution-git-rollback-mechanics)
 
 ---
 
@@ -225,6 +226,7 @@ undo_last(path?: str) -> {
 ```
 
 - **Git Backbone**: Uses the local git repository working tree as the authoritative undo store rather than maintaining ad-hoc snapshot ring buffers.
+- **Zero Commit Pollution**: Interacts directly with Git object plumbing (`git hash-object`) and surgical reverse patching rather than creating commits or touching `HEAD`. See [Appendix: Zero-Pollution Git Rollback Mechanics](#6-appendix-zero-pollution-git-rollback-mechanics).
 - **Safe Reversion**: Allows an agent to step backward instantly if runtime checks, tests, or user reviews fail.
 
 ---
@@ -265,3 +267,68 @@ ruff format --check implementations/python/
 ```
 
 All modifications to protocol specifications or reference implementations must maintain 100% pass rates across existing unit tests and conformance tests.
+
+---
+
+## 6. Appendix: Zero-Pollution Git Rollback Mechanics
+
+To use Git as a reliable safety net for rollback and undo operations without creating dummy commits, modifying `HEAD`, or polluting `git log`, CEMP employs low-level Git plumbing commands and isolated object storage.
+
+### Pattern 1: Git Object Store Blobs (Primary Safety Net)
+
+Before modifying any file on disk, CEMP captures its pre-edit state directly into Git's content-addressable object database:
+
+```bash
+# 1. Store current working tree file bytes as a loose blob in .git/objects
+PRE_BLOB_ID=$(git hash-object -w path/to/file.py)
+```
+
+The returned SHA-1/SHA-256 object identifier (`PRE_BLOB_ID`) is pinned in CEMP's ephemeral patch cache. When rolling back an invalid edit or executing `undo_last`:
+
+```bash
+# 2. Extract original bytes directly from Git object store
+git cat-file -p "$PRE_BLOB_ID" > path/to/file.py.cemp.tmp
+
+# 3. Atomically swap restored file into place
+# Flush, fsync, and os.replace
+```
+
+**Why this protects developer workflows:**
+- **Zero Commit Pollution:** No commits, branches, or tags are created; `git log` and `git status` remain completely untouched.
+- **Protects Uncommitted Work:** If a developer has unstaged modifications prior to an edit, capturing the exact file content at that moment ensures recovery back to their state without data loss.
+- **Automatic Pruning:** Loose unreferenced blobs in `.git/objects` are cleaned up automatically during standard `git gc` cycles.
+
+### Pattern 2: Surgical Reverse Patching (`git apply --reverse`)
+
+When unwinding a patch where other concurrent or subsequent edits should remain intact:
+
+```bash
+git apply --reverse --whitespace=nowarn << 'EOF'
+<unified_diff_preview>
+EOF
+```
+
+- Inverts the specific patch hunks without resetting unrelated files or edits.
+- Fails loudly if intermediate mutations have caused hunk collisions.
+
+### Pattern 3: Isolated Reference Namespaces (`refs/cemp/*`)
+
+For complex multi-file transactions, CEMP can checkpoint tree state using isolated Git references outside `refs/heads/` and `refs/tags/`:
+
+```bash
+TREE_ID=$(git write-tree)
+COMMIT_ID=$(git commit-tree "$TREE_ID" -m "cemp: snapshot $tx_id")
+git update-ref refs/cemp/tx/$tx_id "$COMMIT_ID"
+```
+
+- Standard Git commands (`git log`, `git status`) ignore custom reference hierarchies.
+- These references are never pushed upstream during standard `git push origin main`.
+- Once committed or aborted, the reference is deleted (`git update-ref -d refs/cemp/tx/$tx_id`).
+
+### Prohibited Git Anti-Patterns
+
+| Anti-Pattern | Failure Mode |
+|---|---|
+| Temporary scratch commits (`git commit -m "temp"`) | Pollutes reflog, alters commit timestamps, triggers pre-commit hooks unnecessarily. |
+| Blind `git checkout -- <file>` or `git restore <file>` | **Destructive.** Erases the developer's pre-existing uncommitted work. |
+| `git stash push` / `git stash pop` | Stash operations can fail with merge conflicts, leaving conflict markers on disk. |

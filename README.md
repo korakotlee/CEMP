@@ -1,3 +1,5 @@
+<img src="docs/images/logo-cemp.png" alt="logo" width="300" />
+
 # CEMP (Code Editing MCP Protocol)
 
 An open, versioned specification for reliable LLM code editing, paired with a provider-agnostic macOS reference implementation in Python.

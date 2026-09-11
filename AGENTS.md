@@ -2,10 +2,9 @@
 <!-- 
 Updated AGENTS.md with concrete repository details:
 1. Populated tech stack with Python 3.11+, uv, FastMCP, and JSON Schema Draft 2020-12.
-2. Added mermaid architectural boundary diagram covering protocol, python implementation, and tests.
-3. Added explicit CEMP MCP usage guidelines for code inspection (read_file, get_file_hash, search_code).
-4. Replaced placeholder verification commands with working uv/pytest/ruff commands.
-5. Removed irrelevant Swift screenshot template references.
+2. Updated mermaid architectural boundary diagram to include core/patch_cache.py and core/storage.py.
+3. Added explicit CEMP MCP usage guidelines for code inspection and two-phase commit (propose_edit, propose_line_edit, apply_patch).
+4. Configured verification commands with working uv/pytest/ruff commands.
 -->
 
 # AGENTS.md
@@ -42,6 +41,8 @@ flowchart TD
         CoreHasher["core/hasher.py"]
         CoreEngine["core/engine.py"]
         CoreInspection["core/inspection.py"]
+        CorePatchCache["core/patch_cache.py"]
+        CoreStorage["core/storage.py"]
         Verification["verification/"]
     end
 
@@ -54,7 +55,11 @@ flowchart TD
     Schemas --> Server
     Server --> CoreWorkspace
     Server --> CoreInspection
+    Server --> CoreEngine
     CoreInspection --> CoreHasher
+    CoreEngine --> CorePatchCache
+    CoreEngine --> CoreStorage
+    CoreEngine --> CoreHasher
     Server --> Verification
     PyTests --> Implementation
     Conformance --> Schemas
@@ -81,11 +86,14 @@ flowchart TD
 
 ## 4. CEMP MCP Tool Usage Guidelines
 
-When the `cemp` MCP server is active in the host environment, agents should utilize its tools for context gathering and verification:
+When the `cemp` MCP server is active in the host environment, agents should utilize its tools for context gathering, editing proposals, and atomic commits:
 
 - **`cemp.read_file`**: Use for line-numbered inspection, range-restricted reads, and content hash extraction prior to proposing edits. Avoid blind raw reads when precise line ranges are needed.
 - **`cemp.get_file_hash`**: Compute Compare-And-Swap (CAS) SHA-256 hashes before and after file changes to detect file drift or race conditions.
 - **`cemp.search_code`**: Use for semantic and regex code search across workspace boundaries.
+- **`cemp.propose_edit`**: Use to propose exact string replacements with dry-run unified diff previews and strict occurrence enforcement (`expected_occurrences`). Rejects with `E_NO_MATCH` or `E_OCCURRENCE_MISMATCH` if match counts differ.
+- **`cemp.propose_line_edit`**: Use to propose line-range edits protected by optimistic CAS hash validation (`content_hash`). Rejects with `E_STALE_HASH` if the file modified since last inspection.
+- **`cemp.apply_patch`**: Use to commit a staged patch proposal (`patch_id`) to disk. Re-verifies content hash prior to disk write (`E_FILE_MODIFIED`) and commits atomically via sibling temporary files and `os.replace`.
 - **`cemp.ping_error`**: Use to verify standard CEMP error formatting and connectivity diagnostics.
 
 ---

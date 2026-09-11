@@ -228,3 +228,58 @@ async def test_search_code_conformance_schema(
     assert payload["total_matches"] >= 1
     assert any("README.md" in m["file"] for m in payload["matches"])
 
+
+@pytest.mark.asyncio
+async def test_propose_edit_conformance_schema(
+    server_instance, schema_validator, temp_git_repo: Path, monkeypatch
+):
+    """Validate propose_edit request and response against propose_edit.json."""
+    monkeypatch.setenv("CEMP_WORKSPACE_ROOT", str(temp_git_repo))
+    req = {
+        "path": "README.md",
+        "old_str": "Test Repository",
+        "new_str": "Workspace",
+        "expected_occurrences": 1,
+    }
+    schema_validator("propose_edit", req, target="parameters")
+
+    res: CallToolResult = await server_instance.call_tool("propose_edit", req)
+    assert res.isError is False
+    payload = json.loads(res.content[0].text)
+    schema_validator("propose_edit", payload, target="response")
+    assert payload["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_propose_line_edit_and_apply_conformance_schema(
+    server_instance, schema_validator, temp_git_repo: Path, monkeypatch
+):
+    """Validate propose_line_edit and apply_patch schemas."""
+    monkeypatch.setenv("CEMP_WORKSPACE_ROOT", str(temp_git_repo))
+    read_res: CallToolResult = await server_instance.call_tool("read_file", {"path": "README.md"})
+    file_hash = json.loads(read_res.content[0].text)["content_hash"]
+
+    line_req = {
+        "path": "README.md",
+        "start_line": 1,
+        "end_line": 1,
+        "new_content": "# Updated CEMP Test Repository",
+        "content_hash": file_hash,
+    }
+    schema_validator("propose_line_edit", line_req, target="parameters")
+
+    res1: CallToolResult = await server_instance.call_tool("propose_line_edit", line_req)
+    assert res1.isError is False
+    payload1 = json.loads(res1.content[0].text)
+    schema_validator("propose_line_edit", payload1, target="response")
+
+    apply_req = {"patch_id": payload1["patch_id"], "verify_syntax": True}
+    schema_validator("apply_patch", apply_req, target="parameters")
+
+    res2: CallToolResult = await server_instance.call_tool("apply_patch", apply_req)
+    assert res2.isError is False
+    payload2 = json.loads(res2.content[0].text)
+    schema_validator("apply_patch", payload2, target="response")
+    assert payload2["status"] == "applied"
+
+

@@ -1,177 +1,245 @@
-"""Deterministic inspection engine for reading files, computing CAS hashes, and searching code."""
+"""Proposal and two-phase commit editing engine."""
 
 from __future__ import annotations
 
-import re
+import difflib
 from pathlib import Path
 from typing import Any
 
 from core.hasher import compute_content_hash, normalize_line_endings
-from core.workspace import get_default_workspace_root, resolve_workspace_path
-from errors import InvalidRangeError
+from core.inspection import get_file_hash, read_file, search_code
+from core.patch_cache import PatchCache, PatchStatus
+from core.storage import atomic_write_file
+from core.workspace import resolve_workspace_path
+from errors import (
+    FileModifiedError,
+    InvalidRangeError,
+    NoMatchError,
+    OccurrenceMismatchError,
+    PatchAlreadyAppliedError,
+    StaleHashError,
+)
 
-MAX_SEARCH_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
+# Global patch cache singleton
+_patch_cache = PatchCache(default_ttl_seconds=900)
 
 
-def read_file(
+def get_patch_cache() -> PatchCache:
+    """Access the global in-memory PatchCache instance."""
+    return _patch_cache
+
+
+def _generate_unified_diff(
+    original_text: str,
+    new_text: str,
     path: str,
-    line_range: list[int] | None = None,
+) -> str:
+    """Generate a standard unified diff preview between two texts."""
+    orig_lines = [line + "\n" for line in original_text.splitlines()]
+    new_lines = [line + "\n" for line in new_text.splitlines()]
+    diff = difflib.unified_diff(
+        orig_lines,
+        new_lines,
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+    )
+    return "".join(diff)
+
+
+def propose_edit(
+    path: str,
+    old_str: str,
+    new_str: str,
+    expected_occurrences: int = 1,
     workspace_root: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Read file content with 1-indexed line numbers and content SHA-256 hash.
+    """Propose an exact string replacement with strict occurrence enforcement.
 
     Args:
-        path: Path to target file within workspace.
-        line_range: Optional [start_line, end_line] 1-indexed inclusive range.
+        path: Target file path within workspace.
+        old_str: Exact substring to be replaced.
+        new_str: Replacement substring.
+        expected_occurrences: Expected number of matches (default: 1).
         workspace_root: Optional workspace root directory.
 
     Returns:
-        Dictionary conforming to protocol/schemas/read_file.json.
-
-    Raises:
-        InvalidRangeError: If line_range is inverted, non-positive, or out of bounds.
-        PathTraversalError: If path escapes workspace.
-        FileNotFoundCEMPError: If path does not exist.
-        IsDirectoryError: If path is a directory.
+        Dictionary conforming to protocol/schemas/propose_edit.json.
     """
     resolved_path = resolve_workspace_path(path, workspace_root=workspace_root, must_exist=True)
     raw_text = resolved_path.read_text(encoding="utf-8", errors="replace")
     normalized_text = normalize_line_endings(raw_text)
-    content_hash = compute_content_hash(raw_text)
+    base_hash = compute_content_hash(raw_text)
 
-    all_lines = normalized_text.splitlines() if normalized_text else []
-    total_lines = len(all_lines)
+    count = normalized_text.count(old_str)
+    if count == 0:
+        raise NoMatchError(
+            message=f"Target string not found in '{path}'.",
+            data={"path": path, "old_str": old_str},
+        )
 
-    if line_range is not None:
-        start_line, end_line = line_range[0], line_range[1]
-        if start_line < 1 or start_line > end_line or end_line > total_lines:
-            raise InvalidRangeError(
-                message=(
-                    f"Invalid line range [{start_line}, {end_line}] "
-                    f"for file with {total_lines} total lines."
-                ),
-                data={
-                    "path": path,
-                    "line_range": line_range,
-                    "total_lines": total_lines,
-                },
-            )
-        selected_lines = [
-            [idx, all_lines[idx - 1]] for idx in range(start_line, end_line + 1)
-        ]
-    else:
-        selected_lines = [
-            [idx + 1, line_text] for idx, line_text in enumerate(all_lines)
-        ]
+    if count != expected_occurrences:
+        # Collect line numbers and previews for each occurrence
+        matches: list[dict[str, Any]] = []
+        for idx, line in enumerate(normalized_text.splitlines(), start=1):
+            if old_str in line:
+                matches.append({"line": idx, "preview": line})
+        raise OccurrenceMismatchError(
+            message=f"String matched {count} times; expected exactly {expected_occurrences}.",
+            data={
+                "path": path,
+                "expected_occurrences": expected_occurrences,
+                "actual_occurrences": count,
+                "matches": matches,
+            },
+        )
+
+    new_content = normalized_text.replace(old_str, new_str)
+    diff_preview = _generate_unified_diff(normalized_text, new_content, path)
+
+    proposal = _patch_cache.store(
+        path=path,
+        base_hash=base_hash,
+        new_content=new_content,
+        diff=diff_preview,
+    )
 
     return {
+        "status": "ok",
+        "patch_id": proposal.patch_id,
         "path": path,
-        "lines": selected_lines,
-        "content_hash": content_hash,
-        "total_lines": total_lines,
+        "match_count": count,
+        "diff_preview": diff_preview,
+        "expires_in_seconds": proposal.ttl_seconds,
     }
 
 
-def get_file_hash(
+def propose_line_edit(
     path: str,
+    start_line: int,
+    end_line: int,
+    new_content: str,
+    content_hash: str,
     workspace_root: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Retrieve the optimistic SHA-256 CAS content hash for a file.
+    """Propose a line-bounded edit protected by CAS hash validation.
 
     Args:
-        path: Path to target file within workspace.
+        path: Target file path within workspace.
+        start_line: 1-indexed start line number.
+        end_line: 1-indexed inclusive end line number.
+        new_content: Replacement text for the specified line block.
+        content_hash: SHA-256 hash expected from prior read_file.
         workspace_root: Optional workspace root directory.
 
     Returns:
-        Dictionary containing path and hex-encoded SHA-256 content_hash.
+        Dictionary conforming to protocol/schemas/propose_line_edit.json.
     """
     resolved_path = resolve_workspace_path(path, workspace_root=workspace_root, must_exist=True)
     raw_text = resolved_path.read_text(encoding="utf-8", errors="replace")
-    content_hash = compute_content_hash(raw_text)
+    live_hash = compute_content_hash(raw_text)
+
+    if live_hash != content_hash:
+        raise StaleHashError(
+            message=f"File hash '{live_hash}' differs from provided hash '{content_hash}'.",
+            data={"path": path, "expected_hash": content_hash, "actual_hash": live_hash},
+        )
+
+    normalized_text = normalize_line_endings(raw_text)
+    lines = normalized_text.splitlines()
+    total_lines = len(lines)
+
+    if start_line < 1 or start_line > end_line or end_line > total_lines:
+        raise InvalidRangeError(
+            message=f"Invalid line range [{start_line}, {end_line}] for {total_lines} lines.",
+            data={"path": path, "line_range": [start_line, end_line], "total_lines": total_lines},
+        )
+
+    before_lines = lines[: start_line - 1]
+    norm_new_content = normalize_line_endings(new_content)
+    replacement_lines = norm_new_content.splitlines() if norm_new_content else []
+    after_lines = lines[end_line:]
+
+    assembled_lines = before_lines + replacement_lines + after_lines
+    assembled_content = "\n".join(assembled_lines)
+    if raw_text.endswith("\n") or not raw_text:
+        assembled_content += "\n"
+
+    diff_preview = _generate_unified_diff(normalized_text, assembled_content, path)
+
+    proposal = _patch_cache.store(
+        path=path,
+        base_hash=live_hash,
+        new_content=assembled_content,
+        diff=diff_preview,
+    )
 
     return {
+        "status": "ok",
+        "patch_id": proposal.patch_id,
         "path": path,
-        "content_hash": content_hash,
+        "diff_preview": diff_preview,
+        "expires_in_seconds": proposal.ttl_seconds,
     }
 
 
-def search_code(
-    pattern: str,
-    path_glob: str = "**/*",
-    regex: bool = False,
-    context_lines: int = 3,
+def apply_patch(
+    patch_id: str,
+    tx_id: str | None = None,
+    verify_syntax: bool = True,
     workspace_root: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Search for literal text or regex patterns across workspace files.
+    """Atomically commit a staged patch proposal to disk after CAS re-validation.
 
     Args:
-        pattern: Literal string or regex pattern to search.
-        path_glob: Glob pattern filtering target files.
-        regex: Whether to treat pattern as regular expression.
-        context_lines: Number of surrounding context lines (0 to 20).
+        patch_id: UUID of the staged patch.
+        tx_id: Optional transaction ID (for multi-file transactions).
+        verify_syntax: Whether to verify syntax post-write.
         workspace_root: Optional workspace root directory.
 
     Returns:
-        Dictionary conforming to protocol/schemas/search_code.json.
+        Dictionary conforming to protocol/schemas/apply_patch.json.
     """
-    root = (Path(workspace_root) if workspace_root else get_default_workspace_root()).resolve()
-    context_lines = max(0, min(20, context_lines))
+    proposal = _patch_cache.get(patch_id)
+    if proposal.status == PatchStatus.APPLIED:
+        raise PatchAlreadyAppliedError(
+            message=f"Patch proposal '{patch_id}' has already been applied.",
+            data={"patch_id": patch_id},
+        )
 
-    compiled_regex: re.Pattern[str] | None = None
-    if regex:
-        compiled_regex = re.compile(pattern)
+    resolved_path = resolve_workspace_path(
+        proposal.path, workspace_root=workspace_root, must_exist=True
+    )
+    current_raw = resolved_path.read_text(encoding="utf-8", errors="replace")
+    current_hash = compute_content_hash(current_raw)
 
-    matches: list[dict[str, Any]] = []
+    if current_hash != proposal.base_hash:
+        raise FileModifiedError(
+            message=f"File '{proposal.path}' was modified on disk since proposal creation.",
+            data={
+                "path": proposal.path,
+                "base_hash": proposal.base_hash,
+                "current_hash": current_hash,
+            },
+        )
 
-    # Find matching candidate files using glob resolution
-    if "/" not in path_glob and not path_glob.startswith("**"):
-        candidates = sorted(list(set(root.glob(path_glob)).union(root.glob(f"**/{path_glob}"))))
-    else:
-        candidates = sorted(list(root.glob(path_glob)))
-
-    for item in candidates:
-        if not item.is_file():
-            continue
-
-        # Skip protected internal directories and files
-        if any(part.startswith(".git") for part in item.parts):
-            continue
-        if item.name == ".env" or item.name.startswith(".env."):
-            continue
-
-        rel_path = item.relative_to(root).as_posix()
-
-        # Check file size limit
-        try:
-            if item.stat().st_size > MAX_SEARCH_FILE_SIZE_BYTES:
-                continue
-            raw_text = item.read_text(encoding="utf-8", errors="replace")
-        except (OSError, PermissionError):
-            continue
-
-        lines = normalize_line_endings(raw_text).splitlines()
-        for idx, line in enumerate(lines):
-            is_match = False
-            if compiled_regex:
-                if compiled_regex.search(line):
-                    is_match = True
-            elif pattern in line:
-                is_match = True
-
-            if is_match:
-                start_before = max(0, idx - context_lines)
-                end_after = min(len(lines), idx + 1 + context_lines)
-                matches.append(
-                    {
-                        "file": rel_path,
-                        "line": idx + 1,
-                        "match_content": line,
-                        "context_before": lines[start_before:idx],
-                        "context_after": lines[idx + 1:end_after],
-                    }
-                )
+    atomic_write_file(resolved_path, proposal.new_content)
+    _patch_cache.mark_applied(patch_id)
+    new_hash = compute_content_hash(proposal.new_content)
 
     return {
-        "total_matches": len(matches),
-        "matches": matches,
+        "status": "applied",
+        "patch_id": patch_id,
+        "path": proposal.path,
+        "new_hash": new_hash,
     }
+
+
+__all__ = [
+    "apply_patch",
+    "get_file_hash",
+    "get_patch_cache",
+    "propose_edit",
+    "propose_line_edit",
+    "read_file",
+    "search_code",
+]

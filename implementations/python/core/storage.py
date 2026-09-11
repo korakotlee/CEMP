@@ -40,3 +40,33 @@ def atomic_write_file(path: Path | str, content: str, encoding: str = "utf-8") -
                 tmp_path.unlink()
             except OSError:
                 pass
+
+
+def atomic_write_bytes(path: Path | str, data: bytes) -> None:
+    """Atomically write binary data to a target file.
+
+    Args:
+        path: Destination file path.
+        data: Raw bytes to write.
+
+    Raises:
+        OSError: If writing, syncing, or replacing fails.
+    """
+    target = Path(path).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path = target.parent / f"{target.name}.{uuid.uuid4().hex}.cemp.tmp"
+    try:
+        with open(tmp_path, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(tmp_path, target)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+

@@ -14,7 +14,16 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
 
 from core.engine import (
+    apply_patch as core_apply_patch,
+)
+from core.engine import (
     get_file_hash as core_get_file_hash,
+)
+from core.engine import (
+    propose_edit as core_propose_edit,
+)
+from core.engine import (
+    propose_line_edit as core_propose_line_edit,
 )
 from core.engine import (
     read_file as core_read_file,
@@ -154,6 +163,93 @@ def search_code(
         path_glob=path_glob,
         regex=regex,
         context_lines=context_lines,
+    )
+
+
+@cemp_tool
+def propose_edit(
+    path: str,
+    old_str: str,
+    new_str: str,
+    expected_occurrences: int = 1,
+) -> dict[str, Any]:
+    """Propose an exact string replacement with strict occurrence checking and diff preview.
+
+    Args:
+        path: Path to target file within workspace.
+        old_str: Exact text substring to be replaced.
+        new_str: Replacement text content.
+        expected_occurrences: Strict expected count of matches (default: 1).
+    """
+    debug_log(
+        "Invoking propose_edit",
+        path=path,
+        expected_occurrences=expected_occurrences,
+    )
+    return core_propose_edit(
+        path=path,
+        old_str=old_str,
+        new_str=new_str,
+        expected_occurrences=expected_occurrences,
+    )
+
+
+@cemp_tool
+def propose_line_edit(
+    path: str,
+    start_line: int,
+    end_line: int,
+    new_content: str,
+    content_hash: str,
+) -> dict[str, Any]:
+    """Propose a line range edit protected by Compare-And-Swap (CAS) hash validation.
+
+    Args:
+        path: Path to target file within workspace.
+        start_line: 1-indexed starting line number of the target block.
+        end_line: 1-indexed inclusive ending line number of the target block.
+        new_content: New replacement content for the specified line range.
+        content_hash: SHA-256 hash of the target file content obtained from read_file.
+    """
+    debug_log(
+        "Invoking propose_line_edit",
+        path=path,
+        start_line=start_line,
+        end_line=end_line,
+        content_hash=content_hash,
+    )
+    return core_propose_line_edit(
+        path=path,
+        start_line=start_line,
+        end_line=end_line,
+        new_content=new_content,
+        content_hash=content_hash,
+    )
+
+
+@cemp_tool
+def apply_patch(
+    patch_id: str,
+    tx_id: str | None = None,
+    verify_syntax: bool = True,
+) -> dict[str, Any]:
+    """Apply a proposed patch to disk or stage it into an active transaction.
+
+    Args:
+        patch_id: Identifier of the staged patch from propose_edit or propose_line_edit.
+        tx_id: Optional transaction ID.
+        verify_syntax: Whether to run language syntax validation hooks post-write.
+    """
+    debug_log(
+        "Invoking apply_patch",
+        patch_id=patch_id,
+        tx_id=tx_id,
+        verify_syntax=verify_syntax,
+    )
+    return core_apply_patch(
+        patch_id=patch_id,
+        tx_id=tx_id,
+        verify_syntax=verify_syntax,
     )
 
 

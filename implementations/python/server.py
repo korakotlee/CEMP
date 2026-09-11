@@ -13,6 +13,15 @@ from typing import Any, Callable
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
 
+from core.engine import (
+    get_file_hash as core_get_file_hash,
+)
+from core.engine import (
+    read_file as core_read_file,
+)
+from core.engine import (
+    search_code as core_search_code,
+)
 from errors import (
     OccurrenceMismatchError,
     format_cemp_error,
@@ -98,6 +107,53 @@ def ping_error() -> CallToolResult:
     raise OccurrenceMismatchError(
         message="Conformance ping error verification",
         data={"expected_occurrences": 1, "actual_occurrences": 2},
+    )
+
+
+@cemp_tool
+def read_file(path: str, line_range: list[int] | None = None) -> dict[str, Any]:
+    """Read file contents with 1-indexed line numbers and content SHA-256 hash for CAS operations.
+
+    Args:
+        path: Path to the target file, absolute or relative to workspace root.
+        line_range: Optional [start_line, end_line] 1-indexed inclusive range.
+    """
+    debug_log("Invoking read_file", path=path, line_range=line_range)
+    return core_read_file(path=path, line_range=line_range)
+
+
+@cemp_tool
+def get_file_hash(path: str) -> dict[str, Any]:
+    """Retrieve optimistic SHA-256 CAS content hash for a file.
+
+    Args:
+        path: Path to the target file, absolute or relative to workspace root.
+    """
+    debug_log("Invoking get_file_hash", path=path)
+    return core_get_file_hash(path=path)
+
+
+@cemp_tool
+def search_code(
+    pattern: str,
+    path_glob: str = "**/*",
+    regex: bool = False,
+    context_lines: int = 3,
+) -> dict[str, Any]:
+    """Search for literal text or regex patterns across workspace files.
+
+    Args:
+        pattern: Search string or regular expression pattern.
+        path_glob: Glob pattern filtering target paths (e.g. 'src/**/*.py').
+        regex: If true, pattern is parsed as a regular expression.
+        context_lines: Number of lines of surrounding context to include before and after matches.
+    """
+    debug_log("Invoking search_code", pattern=pattern, path_glob=path_glob, regex=regex)
+    return core_search_code(
+        pattern=pattern,
+        path_glob=path_glob,
+        regex=regex,
+        context_lines=context_lines,
     )
 
 

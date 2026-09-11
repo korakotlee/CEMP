@@ -17,10 +17,12 @@ from errors.proposal_errors import (
 )
 from errors.system_errors import (
     FileNotFoundCEMPError,
+    FileNotFoundCempError,
     GitDirtyConflictError,
     InternalServerError,
     IsDirectoryError,
     PathTraversalError,
+    PermissionDeniedCempError,
     PermissionDeniedError,
     RollbackTriggeredError,
     SyntaxErrorCEMP,
@@ -38,6 +40,7 @@ __all__ = [
     "CEMPErrorPayload",
     "FileModifiedError",
     "FileNotFoundCEMPError",
+    "FileNotFoundCempError",
     "GitDirtyConflictError",
     "InternalServerError",
     "InvalidRangeError",
@@ -48,6 +51,7 @@ __all__ = [
     "PatchExpiredError",
     "PatchNotFoundError",
     "PathTraversalError",
+    "PermissionDeniedCempError",
     "PermissionDeniedError",
     "RollbackTriggeredError",
     "StaleHashError",

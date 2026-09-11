@@ -135,6 +135,11 @@ class PermissionDeniedError(CEMPError):
         )
 
 
+# Aliases for naming flexibility
+FileNotFoundCempError = FileNotFoundCEMPError
+PermissionDeniedCempError = PermissionDeniedError
+
+
 class IsDirectoryError(CEMPError):
     def __init__(
         self,

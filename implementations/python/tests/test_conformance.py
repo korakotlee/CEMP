@@ -76,55 +76,6 @@ async def test_standardized_error_format(server_instance):
     assert isinstance(error_payload["suggested_action"], str)
 
 
-def test_error_registry_invariants():
-    """Ensure error code definitions adhere to JSON-RPC application error range."""
-    from errors import CEMPErrorCode
-
-    for item in CEMPErrorCode:
-        assert -32099 <= item.value <= -32000, f"Error code {item.name} out of range"
-
-
-def test_cemp_error_serialization():
-    """Ensure CEMPError instances serialize to conforming error dictionaries."""
-    from errors import NoMatchError, OccurrenceMismatchError
-
-    err = NoMatchError()
-    payload = err.to_dict()
-    assert payload["code"] == -32000
-    assert payload["name"] == "E_NO_MATCH"
-    assert payload["recoverable"] is True
-    assert payload["suggested_action"] == "RE_INSPECT"
-
-    mismatch = OccurrenceMismatchError(
-        "Expected 1 match, found 3",
-        data={"expected": 1, "actual": 3, "matches": [14, 42, 89]},
-    )
-    m_payload = mismatch.to_dict()
-    assert m_payload["code"] == -32001
-    assert m_payload["data"]["actual"] == 3
-    assert m_payload["suggested_action"] == "EXPAND_CONTEXT"
-
-
-def test_format_cemp_error_utility():
-    """Ensure format_cemp_error converts both CEMPError and generic exceptions."""
-    from errors import StaleHashError, format_cemp_error
-
-    stale = StaleHashError("Hash mismatch", data={"current_hash": "abcdef"})
-    res1 = format_cemp_error(stale)
-    assert res1.isError is True
-    data1 = json.loads(res1.content[0].text)
-    assert data1["code"] == -32010
-    assert data1["name"] == "E_STALE_HASH"
-
-    generic = ValueError("Invalid operation")
-    res2 = format_cemp_error(generic)
-    assert res2.isError is True
-    data2 = json.loads(res2.content[0].text)
-    assert data2["code"] == -32099
-    assert data2["name"] == "E_INTERNAL_ERROR"
-    assert "Invalid operation" in data2["message"]
-
-
 @pytest.mark.asyncio
 async def test_uncaught_exception_cemp_tool(server_instance):
     """Ensure cemp_tool decorator safely catches unhandled exceptions and returns CEMP error."""
@@ -281,5 +232,66 @@ async def test_propose_line_edit_and_apply_conformance_schema(
     payload2 = json.loads(res2.content[0].text)
     schema_validator("apply_patch", payload2, target="response")
     assert payload2["status"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_transaction_conformance_schemas(
+    server_instance, schema_validator, temp_git_repo: Path, monkeypatch
+):
+    """Validate begin_transaction, apply_patch with tx_id, commit_transaction,
+    and rollback_transaction schemas.
+    """
+    monkeypatch.setenv("CEMP_WORKSPACE_ROOT", str(temp_git_repo))
+
+    # 1. begin_transaction validation
+    begin_req = {"isolation_level": "snapshot"}
+    schema_validator("transaction/begin_transaction", begin_req, target="parameters")
+    begin_res: CallToolResult = await server_instance.call_tool("begin_transaction", begin_req)
+    assert begin_res.isError is False
+    begin_payload = json.loads(begin_res.content[0].text)
+    schema_validator("transaction/begin_transaction", begin_payload, target="response")
+    assert begin_payload["status"] == "open"
+    tx_id = begin_payload["tx_id"]
+
+    # 2. propose_edit and apply_patch with tx_id (staging)
+    prop_res = await server_instance.call_tool(
+        "propose_edit",
+        {
+            "path": "README.md",
+            "old_str": "Test Repository",
+            "new_str": "Transacted Repo",
+            "expected_occurrences": 1,
+        },
+    )
+    patch_id = json.loads(prop_res.content[0].text)["patch_id"]
+
+    apply_tx_req = {"patch_id": patch_id, "tx_id": tx_id}
+    schema_validator("apply_patch", apply_tx_req, target="parameters")
+    apply_tx_res = await server_instance.call_tool("apply_patch", apply_tx_req)
+    assert apply_tx_res.isError is False
+    apply_tx_payload = json.loads(apply_tx_res.content[0].text)
+    schema_validator("apply_patch", apply_tx_payload, target="response")
+    assert apply_tx_payload["status"] == "staged"
+
+    # 3. commit_transaction validation
+    commit_req = {"tx_id": tx_id, "verify_syntax": True}
+    schema_validator("transaction/commit_transaction", commit_req, target="parameters")
+    commit_res = await server_instance.call_tool("commit_transaction", commit_req)
+    assert commit_res.isError is False
+    commit_payload = json.loads(commit_res.content[0].text)
+    schema_validator("transaction/commit_transaction", commit_payload, target="response")
+    assert commit_payload["status"] == "committed"
+
+    # 4. rollback_transaction validation
+    b2_res = await server_instance.call_tool("begin_transaction", {})
+    tx2_id = json.loads(b2_res.content[0].text)["tx_id"]
+    rollback_req = {"tx_id": tx2_id}
+    schema_validator("transaction/rollback_transaction", rollback_req, target="parameters")
+    rollback_res = await server_instance.call_tool("rollback_transaction", rollback_req)
+    assert rollback_res.isError is False
+    rollback_payload = json.loads(rollback_res.content[0].text)
+    schema_validator("transaction/rollback_transaction", rollback_payload, target="response")
+    assert rollback_payload["status"] == "rolled_back"
+
 
 

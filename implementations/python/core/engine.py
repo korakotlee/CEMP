@@ -12,6 +12,7 @@ from core.patch_cache import PatchCache, PatchStatus
 from core.proposals import propose_edit as _propose_edit
 from core.proposals import propose_line_edit as _propose_line_edit
 from core.storage import atomic_write_file
+from core.transactions import get_transaction_manager
 from core.workspace import resolve_workspace_path
 from errors import (
     FileModifiedError,
@@ -90,6 +91,10 @@ def apply_patch(
             message=f"Patch proposal '{patch_id}' has already been applied.",
             data={"patch_id": patch_id},
         )
+
+    if tx_id is not None:
+        tx_mgr = get_transaction_manager()
+        return tx_mgr.stage_patch(tx_id=tx_id, proposal=proposal, workspace_root=workspace_root)
 
     resolved_path = resolve_workspace_path(
         proposal.path, workspace_root=workspace_root, must_exist=True
@@ -185,13 +190,51 @@ def undo_last(
     return result
 
 
+def begin_transaction(
+    isolation_level: str = "snapshot",
+    ttl_seconds: int | None = None,
+    workspace_root: Path | str | None = None,
+) -> dict[str, Any]:
+    """Begin an atomic multi-file transaction session."""
+    tx_mgr = get_transaction_manager()
+    return tx_mgr.begin_transaction(isolation_level=isolation_level, ttl_seconds=ttl_seconds)
+
+
+def commit_transaction(
+    tx_id: str,
+    verify_syntax: bool = True,
+    workspace_root: Path | str | None = None,
+) -> dict[str, Any]:
+    """Atomically commit all staged patches within an open transaction."""
+    tx_mgr = get_transaction_manager()
+    return tx_mgr.commit_transaction(
+        tx_id=tx_id,
+        patch_cache=_patch_cache,
+        verify_syntax=verify_syntax,
+        workspace_root=workspace_root,
+    )
+
+
+def rollback_transaction(
+    tx_id: str,
+    workspace_root: Path | str | None = None,
+) -> dict[str, Any]:
+    """Abort an open transaction and discard all staged modifications."""
+    tx_mgr = get_transaction_manager()
+    return tx_mgr.rollback_transaction(tx_id=tx_id, workspace_root=workspace_root)
+
+
 __all__ = [
     "apply_patch",
+    "begin_transaction",
+    "commit_transaction",
     "get_file_hash",
     "get_patch_cache",
+    "get_transaction_manager",
     "propose_edit",
     "propose_line_edit",
     "read_file",
+    "rollback_transaction",
     "search_code",
     "undo_last",
 ]

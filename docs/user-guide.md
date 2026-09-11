@@ -12,8 +12,9 @@ This guide explains how to configure and run the CEMP Model Context Protocol (MC
    - [Google Antigravity IDE](#google-antigravity-ide)
    - [Claude Desktop](#claude-desktop)
    - [Cursor / VS Code MCP](#cursor--vs-code-mcp)
-4. [Verification & Health Checks](#4-verification--health-checks)
-5. [Troubleshooting & Diagnostics](#5-troubleshooting--diagnostics)
+4. [Multi-File Transactions & Safe Refactoring](#4-multi-file-transactions--safe-refactoring)
+5. [Verification & Health Checks](#5-verification--health-checks)
+6. [Troubleshooting & Diagnostics](#6-troubleshooting--diagnostics)
 
 ---
 
@@ -127,7 +128,32 @@ In `.cursor/mcp.json` or `.vscode/mcp.json`:
 
 ---
 
-## 4. Verification & Health Checks
+## 4. Multi-File Transactions & Safe Refactoring
+
+When performing cross-cutting refactoring spanning multiple files, use CEMP atomic multi-file transactions to avoid leaving the codebase in a half-applied state:
+
+### 4.1 Step-by-Step Workflow
+
+1. **Start Transaction**: Call `begin_transaction()` to obtain an isolated `tx_id`.
+2. **Propose and Stage Changes**:
+   - Call `propose_edit(...)` or `propose_line_edit(...)` to generate patches.
+   - Stage each patch via `apply_patch(patch_id=..., tx_id=tx_id)`. The tool returns `status: "staged"` without modifying files on disk.
+3. **Batch Commit**:
+   - Call `commit_transaction(tx_id=tx_id, verify_syntax=True)`.
+   - CEMP validates CAS baseline hashes across all staged files, creates pre-edit Git undo snapshots, writes changes atomically, and validates syntax.
+4. **Abort / Rollback (Optional)**:
+   - If refactoring is cancelled, call `rollback_transaction(tx_id=tx_id)` to discard staged files and clean up temporary storage.
+
+### 4.2 Error Handling and Recovery
+
+- **`E_TRANSACTION_ACTIVE` (`-32031`)**: Another transaction is already open in the session. Call `commit_transaction` or `rollback_transaction` on the existing transaction before opening a new one.
+- **`E_TRANSACTION_NOT_FOUND` (`-32030`)**: The specified `tx_id` is invalid or expired (default TTL: 1800s). Call `begin_transaction` to initiate a fresh session.
+- **`E_FILE_MODIFIED` (`-32011`)**: A target file was edited externally between patch creation and commit. Re-inspect the file with `read_file` and re-propose patches against current file state.
+- **`E_ROLLBACK_TRIGGERED` (`-32042`)**: Post-write syntax validation failed on one or more files. CEMP has already restored all touched files in the batch to their pre-commit snapshot. Review compiler diagnostics in the error payload to resolve syntax issues.
+
+---
+
+## 5. Verification & Health Checks
 
 Run the automated test suite to verify conformance with protocol schemas and error handling:
 
@@ -149,12 +175,12 @@ You should see a single JSON-RPC response on stdout containing `"name": "cemp"` 
 
 ---
 
-## 5. Troubleshooting & Diagnostics
+## 6. Troubleshooting & Diagnostics
 
 ### Standard Output Pollution
 - **Symptom:** MCP host reports `JSONDecodeError` or unexpected end of input during handshake.
 - **Root Cause:** Print statements or library loggers writing unformatted text to `stdout`.
-- **Solution:** In CEMP, all logging is strictly routed to `sys.stderr` using `debug_log(...)` in `server.py`. Ensure any newly added modules use `debug_log(...)` and never call raw `print()`.
+- **Solution:** In CEMP, all logging is strictly routed to `sys.stderr` using `debug_log(...)` in `server_helpers.py`. Ensure any newly added modules use `debug_log(...)` and never call raw `print()`.
 
 ### Missing uv in PATH
 - **Symptom:** Agent reports `command not found: uv`.

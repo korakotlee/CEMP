@@ -79,11 +79,22 @@ def schema_validator(protocol_dir: Path) -> Callable[[str, dict[str, Any]], None
 
     def validate(schema_name: str, instance: dict[str, Any], target: str | None = None) -> None:
         key = schema_name.removesuffix(".json")
-        if key not in schemas:
-            raise KeyError(
-                f"Schema '{schema_name}' not found. Available schemas: {sorted(schemas.keys())}"
-            )
-        schema_def = schemas[key]
+        if "/" in key:
+            main_key, def_key = key.split("/", 1)
+            if main_key not in schemas:
+                raise KeyError(
+                    f"Schema '{main_key}' not found. Available schemas: {sorted(schemas.keys())}"
+                )
+            schema_def = schemas[main_key].get("definitions", {}).get(def_key, {})
+            if not schema_def:
+                raise KeyError(f"Definition '{def_key}' not found in schema '{main_key}'")
+        else:
+            if key not in schemas:
+                raise KeyError(
+                    f"Schema '{schema_name}' not found. Available schemas: {sorted(schemas.keys())}"
+                )
+            schema_def = schemas[key]
+
         if target:
             if target not in schema_def.get("properties", {}):
                 raise KeyError(f"Target '{target}' not in schema '{schema_name}' properties")
@@ -96,6 +107,16 @@ def schema_validator(protocol_dir: Path) -> Callable[[str, dict[str, Any]], None
             _run_validate(schema_def, instance)
 
     return validate
+
+
+@pytest.fixture(autouse=True)
+def clean_global_tx_state():
+    """Reset transaction manager before and after tests across suite."""
+    from core.transactions import reset_transaction_manager
+
+    reset_transaction_manager()
+    yield
+    reset_transaction_manager()
 
 
 @pytest.fixture

@@ -11,25 +11,25 @@ Implement multi-file transaction management (`begin_transaction`, `commit_transa
 * **Expected Behavior:** An agent can begin a transaction (`tx_id`), stage multiple patch proposals against that transaction, and commit them atomically. If any file in the batch fails hash verification or syntax checking, none of the files are written to disk, or all staged modifications are rolled back atomically.
 
 ### 3. Acceptance Criteria
-- [ ] Implement `core/transactions.py` managing transaction lifecycles and staged patch registries.
-- [ ] Implement `begin_transaction` conforming to `protocol/schemas/transaction.json`:
+- [x] Implement `core/transactions.py` managing transaction lifecycles and staged patch registries.
+- [x] Implement `begin_transaction` conforming to `protocol/schemas/transaction.json`:
   - Generate a cryptographically secure `tx_id`.
   - Disallow nested or overlapping concurrent transactions per session, raising error `-32031` (`E_TRANSACTION_ACTIVE`).
-- [ ] Extend `apply_patch(patch_id, tx_id)`:
+- [x] Extend `apply_patch(patch_id, tx_id)`:
   - If `tx_id` is supplied, validate `tx_id` exists (otherwise raise `-32030` `E_TRANSACTION_NOT_FOUND`).
   - Stage the patch in an isolated temporary staging directory or memory map instead of modifying the live file immediately.
   - Return staging confirmation with staged file list.
-- [ ] Implement `commit_transaction(tx_id)`:
+- [x] Implement `commit_transaction(tx_id)`:
   - Verify all target files still match their pre-condition CAS hashes. If any file has drifted, abort commit with `-32011` (`E_FILE_MODIFIED`).
   - Capture pre-edit Git blobs for all target files in the transaction batch.
   - Apply atomic file replacements across all files in coordinated sequence.
   - Execute post-write verification across all modified files.
   - If any verification check fails, automatically rollback all files modified in the transaction batch and raise `-32042` (`E_ROLLBACK_TRIGGERED`).
   - Return list of successfully updated files and commit status.
-- [ ] Implement `rollback_transaction(tx_id)`:
+- [x] Implement `rollback_transaction(tx_id)`:
   - Discard all staged patches and clean up temporary staging artifacts.
   - Return confirmation of rollback without touching target filesystem.
-- [ ] Mount transaction tools on `server.py` and validate against `tests/test_conformance.py` and `tests/test_transactions.py`.
+- [x] Mount transaction tools on `server.py` and validate against `tests/test_conformance.py` and `tests/test_transactions.py`.
 
 ### 4. Data Model
 * **Storage & Schema:** Isolated temporary staging workspace (`<tempdir>/cemp_tx_<tx_id>/`) holding candidate file contents. In-memory `Transaction` model tracking active state, target paths, and staged patches.

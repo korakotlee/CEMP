@@ -172,25 +172,44 @@ Step 3 (Commit):
 
 ### 2.4 Batch and Transactional Multi-File Edits
 
-Refactoring frequently requires synchronized changes across multiple files (e.g., renaming a signature and updating all import/call sites).
+Refactoring frequently requires synchronized changes across multiple files (e.g., renaming a function signature and updating all import/call sites). CEMP provides atomic multi-file transaction semantics conforming to `protocol/schemas/transaction.json` and `protocol/schemas/apply_patch.json`:
 
 ```python
-begin_transaction() -> tx_id
-
-apply_patch(patch_id: str, tx_id: str)  # Stages change in memory/staging dir
-
-commit_transaction(tx_id: str) -> {
-    "status": "committed",
-    "files_updated": List[str]
+# 1. Open an isolated transaction session (rejects with E_TRANSACTION_ACTIVE if already open)
+begin_transaction(isolation_level: str = "snapshot") -> {
+    "status": "open",
+    "tx_id": str,
+    "expires_in_seconds": int
 }
 
+# 2. Stage patches into transaction overlay without modifying live files on disk
+apply_patch(patch_id: str, tx_id: str) -> {
+    "status": "staged",
+    "patch_id": str,
+    "path": str
+}
+
+# 3. Atomically commit all staged files in coordinated batch with CAS and syntax verification
+commit_transaction(tx_id: str, verify_syntax: bool = True) -> {
+    "status": "committed",
+    "tx_id": str,
+    "files_updated": List[str],
+    "file_hashes": Dict[str, str]
+}
+
+# 4. Or abort transaction and discard staged modifications without altering disk
 rollback_transaction(tx_id: str) -> {
-    "status": "rolled_back"
+    "status": "rolled_back",
+    "tx_id": str,
+    "discarded_patches_count": int
 }
 ```
 
-- **All-or-Nothing Guarantees**: If file 4 of 6 fails hash validation or syntax verification, none of the files are committed to disk.
-- **Staging Implementation**: Changes stage in a temporary workspace or via APFS clones, followed by coordinated atomic `os.replace` swaps.
+- **Single Active Transaction per Session**: Calling `begin_transaction` when a transaction is already active returns error code `-32031` (`E_TRANSACTION_ACTIVE`), enforcing clean boundaries and preventing deadlock.
+- **Isolated Filesystem Staging**: Patches staged with `tx_id` are written into an ephemeral per-transaction temporary directory (`cemp_tx_<tx_id>`), leaving working tree files untouched until commit.
+- **Pre-Commit CAS Verification**: Before altering any file on disk, `commit_transaction` verifies live file hashes against proposal baseline hashes for all staged targets. If any file drifted, commit aborts with error code `-32011` (`E_FILE_MODIFIED`).
+- **Coordinated Batch Commit and Rollback**: Pre-edit Git blob snapshots are captured for all staged targets prior to replacement. If `verify_syntax` is enabled and any file fails syntax checks, all modified files in the batch are automatically restored to their pre-commit state and the operation rejects with error code `-32042` (`E_ROLLBACK_TRIGGERED`).
+- **Clean Ephemeral Lifecycle**: Staging directories and cached state are automatically purged upon successful commit, explicit rollback, or TTL expiration.
 
 ---
 

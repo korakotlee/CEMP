@@ -145,8 +145,8 @@ Add the reference server to your MCP host configuration (e.g. Claude Desktop, An
 Verify that the reference implementation conforms to the protocol specification:
 
 ```bash
-# Run tests
-pytest implementations/python/tests/
+# Run tests via uv
+uv run --directory implementations/python pytest
 ```
 
 ---

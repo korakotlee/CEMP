@@ -91,3 +91,28 @@ def test_reject_directory_when_file_expected(tmp_path: Path):
         resolve_workspace_path("subdir", workspace_root=tmp_path, allow_directory=False)
 
     assert exc_info.value.code == -32053
+
+
+def test_find_git_root_and_default_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify git root traversal locates repo root and get_default_workspace_root honors it."""
+    from core.workspace import find_git_root, get_default_workspace_root
+
+    repo_root = tmp_path / "my_repo"
+    sub_dir = repo_root / "implementations" / "python"
+    sub_dir.mkdir(parents=True)
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+
+    # When start_path is in sub_dir, it should find repo_root
+    assert find_git_root(sub_dir) == repo_root
+
+    # When env var is unset and cwd is sub_dir
+    monkeypatch.delenv("CEMP_WORKSPACE_ROOT", raising=False)
+    monkeypatch.chdir(sub_dir)
+    assert get_default_workspace_root() == repo_root
+
+    # When env var is explicitly set, env var takes precedence
+    override_dir = tmp_path / "custom_root"
+    override_dir.mkdir()
+    monkeypatch.setenv("CEMP_WORKSPACE_ROOT", str(override_dir))
+    assert get_default_workspace_root() == override_dir.resolve()

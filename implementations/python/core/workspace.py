@@ -17,11 +17,23 @@ _PROTECTED_DIR_PARTS = {".git"}
 _PROTECTED_FILE_PREFIXES = {".env"}
 
 
+def find_git_root(start_path: Path | None = None) -> Path | None:
+    """Traverse upwards from start_path to locate the enclosing git repository root."""
+    current = (start_path or Path.cwd()).resolve()
+    for candidate in [current, *current.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
 def get_default_workspace_root() -> Path:
     """Retrieve the designated workspace root directory."""
     env_root = os.getenv("CEMP_WORKSPACE_ROOT")
     if env_root:
         return Path(env_root).resolve()
+    git_root = find_git_root()
+    if git_root is not None:
+        return git_root
     return Path.cwd().resolve()
 
 

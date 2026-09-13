@@ -92,13 +92,21 @@ flowchart TD
 2. **Never Log Plaintext Credentials**: Never output API keys, tokens, or private secrets to logs or test outputs.
 3. **No Em-Dashes**: Do not use the em-dash character in markdown, docs, or commit messages. Use plain dashes (`-`), commas, or parentheses.
 4. **No Direct Writes Without Tests**: Never commit implementation changes without passing unit and conformance test suites.
+5. **No Direct File Writes When CEMP Is Available**: Do not use native IDE direct file write/replace tools when the `cemp` MCP server is active. Always use the two-phase CEMP editing protocol.
 
 ---
 
-## 4. CEMP MCP Tool Usage Guidelines
+## 4. Mandatory CEMP MCP Tool Usage Protocol
 
-When the `cemp` MCP server is active in the host environment, agents should utilize its tools for context gathering, editing proposals, atomic commits, and multi-file transactions:
+When the `cemp` MCP server is active in the host environment, AI agents **MUST** use CEMP MCP tools for all file inspections, editing proposals, atomic commits, and multi-file transactions. Native IDE direct-write tools are prohibited unless bootstrapping the CEMP server or recovering from an MCP server crash.
 
+### Interactive User Approval Gate
+To preserve human-in-the-loop oversight (matching the IDE Accept/Reject experience), AI agents **MUST NOT** invoke `cemp.apply_patch` immediately after a proposal. The agent must:
+1. Propose the edit via `cemp.propose_edit` or `cemp.propose_line_edit`.
+2. Present the generated `diff_preview` in chat for the user to inspect.
+3. Explicitly wait for user approval before applying the patch via `cemp.apply_patch` (or `cemp.commit_transaction`).
+
+### Tool Capabilities
 - **`cemp.read_file`**: Use for line-numbered inspection, range-restricted reads, and content hash extraction prior to proposing edits. Avoid blind raw reads when precise line ranges are needed.
 - **`cemp.get_file_hash`**: Compute Compare-And-Swap (CAS) SHA-256 hashes before and after file changes to detect file drift or race conditions.
 - **`cemp.search_code`**: Use for semantic and regex code search across workspace boundaries.
